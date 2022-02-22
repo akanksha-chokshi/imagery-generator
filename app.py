@@ -21,14 +21,24 @@ unsplash_access_key = 'CD3pcpVIaLzJ9_EZKFTZBOFW-gEzpdXmpGZ6kyp5szc'
 
 st.title('Imagery Generator')
 
+st.sidebar.title('How This Works')
+st.sidebar.markdown('')
+st.sidebar.markdown(' - Enter some text.')
+st.sidebar.makrdown(' - The imagery generator first uses the Unsplash API to find images labelled with the keywords in the entered description.')
+st.sidebar.markdown(' - It obtains 100 preliminary images from Unsplash which are passed through CLIP, an image-to-text neural network.')
+st.sidebar.markdown(' - CLIP returns the similarity scores of each image when compared to the initial text description.')
+st.sidebar.markdown(' - The generator then displays the top images in the form of a grid, which you can download')
+st.sidebar.markdown(' - The image sources are also linked and credited below.')
+st.sidebar.markdown(' - Use this tool to generate inspiration for your next creative work or create a moodboard to motivate you.')
+st.sidebar.markdown(' - Note: Images may take up to a minute to load.')
+		    
+
 description = st.text_input('Enter Some Text')
 num = st.slider("Number of Pictures", min_value = 1, max_value = 15)
 show = st.button("Show Me Some Pictures!")
 
 search_count = 100
 
-# Function used to load a photo from the API
-# The photos are downloaded in a small resolution (max 500 pixels wide), because CLIP only supports 224x224 images
 def load_photo(url):
     return Image.open(urlopen(url + "&w=500"))  
 
@@ -47,59 +57,45 @@ if show:
     if not description:
         st.write("Please Fill In All Fields")
     else:
-        # Convert the search keywords in a format suitable for the API
         query_string = quote_plus(description)
-
-        # Compute how much pages we need to fetch fromt he search results (assuming 20 photos per page)
         photos_per_page = 20
         pages_count = math.ceil(search_count/photos_per_page)
 
-        # Go through each search result page and store the URLs and metadata of the photos
         photos_data = []
         for page in range(0, pages_count):
-            # Make an authenticated call to the API and parse the results as JSON
             request = Request(f"https://api.unsplash.com/search/photos?page={page+1}&per_page={photos_per_page}&query={query_string}")
             request.add_header("Authorization", f"Client-ID {unsplash_access_key}")
             response = urlopen(request).read().decode("utf-8")
             search_result = json.loads(response)
 
-            # Add each photo URL to the list
             for photo in search_result['results']:
                 photos_data.append(dict(url=photo['urls']['raw'], 
                                     link=photo['links']['html'],
                                     user_name=photo['user']['name'],
                                     user_link=photo['user']['links']['html'],))
 
-        # Parallelize the download using a thread pool
         photo_urls = [photo['url'] for photo in photos_data]
         pool = ThreadPool(16)
         photos = pool.map(load_photo, photo_urls)
 
-        # Load the open CLIP model
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model, preprocess = clip.load("ViT-B/32", device=device)
 
         with torch.no_grad():
-            # Encode and normalize the description using CLIP
             description_encoded = model.encode_text(clip.tokenize(description).to(device))
             description_encoded /= description_encoded.norm(dim=-1, keepdim=True)
 
         with torch.no_grad():
-            # Preprocess all photos and stack them in a batch
             photos_preprocessed = torch.stack([preprocess(photo) for photo in photos]).to(device)
 
-            # Encode and normalize the photos using CLIP
             photos_encoded = model.encode_image(photos_preprocessed)
             photos_encoded /= photos_encoded.norm(dim=-1, keepdim=True)
 
-        # Retrieve the description vector and the photo vectors
         description_vector = description_encoded.cpu().numpy()
         photo_vectors = photos_encoded.cpu().numpy()
 
-        # Compute the similarity between the descrption and each photo using the Cosine similarity
         similarities = list((description_vector @ photo_vectors.T).squeeze(0))
 
-        # Sort the photos by their similarity score
         best_photos = sorted(zip(similarities, range(len(photos))), key=lambda x: x[0], reverse=True)
 
         from IPython.core.display import HTML
@@ -140,6 +136,9 @@ if show:
                 photo_data = photos_data[best_photos[i][1]]
                 st.markdown("Photo " + str(i + 1) + " By " + photo_data["user_name"] + " On Unsplash: " + photo_data["link"], unsafe_allow_html=True)
 
-        
+with st.expander("What I Learned From This Project"):
+	st.markdown('I used the Unsplash API for this project. I practised handling images some more and learned how to display them in a grid.')
+	st.markdown('I learned the basics of neural networks and understood how to encode images and descriptions and learn their similarities using CLIP.')
+	st.markdown('I learned how to parallelise and load pictures through a Thread Pool.')
 
         
